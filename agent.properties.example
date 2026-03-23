@@ -2,7 +2,3 @@ api.key=
 api.base-url=
 api.model=claude-haiku-4-5
 agent.max-iterations=15
-agent.system-prompt=你是一个编码助手 Agent。你可以读写文件、列出目录内容、执行 shell 命令。\
-请将复杂任务拆解为多个步骤，逐步完成。\
-在执行操作之前，先说明你的思路和计划。
-

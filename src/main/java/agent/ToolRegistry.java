@@ -28,7 +28,8 @@ public class ToolRegistry {
         register(new ExecuteCommandTool());
     }
 
-    private void register(Tool tool) {
+    /** 注册一个工具。外部可调用此方法注册额外工具（如 activate_skill）。 */
+    public void register(Tool tool) {
         tools.put(tool.name(), tool);
     }
 

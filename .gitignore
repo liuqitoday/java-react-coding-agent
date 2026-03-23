@@ -18,3 +18,4 @@ target/
 logs/
 *.log
 
+.agents/

@@ -1,12 +1,19 @@
 package agent;
 
+import agent.skills.SkillPromptBuilder;
+import agent.skills.SkillRegistry;
+import agent.skills.SkillSessionState;
+import agent.tools.ActivateSkillTool;
+
 import java.util.Scanner;
 
 /**
  * 程序入口：初始化所有组件，启动 REPL 交互循环。
  *
- * 组装流程：AgentConfig → LLMLogger → LLMClient → ToolRegistry → ConsoleRenderer → ReActLoop
- * 然后进入"读取用户输入 → 执行 ReAct 循环 → 等待下一次输入"的主循环。
+ * 组装流程：
+ * AgentConfig → LLMLogger → LLMClient → ToolRegistry
+ *            → SkillRegistry → SkillSessionState → SkillPromptBuilder
+ *            → ConsoleRenderer → ReActLoop
  */
 public class Main {
 
@@ -25,22 +32,40 @@ public class Main {
             System.exit(1);
         }
 
-        // 初始化各组件
+        // 初始化核心组件
         LLMLogger logger = new LLMLogger();
         LLMClient llmClient = new LLMClient(config, logger);
         ToolRegistry toolRegistry = new ToolRegistry();
         ConsoleRenderer renderer = new ConsoleRenderer();
-        ReActLoop reactLoop = new ReActLoop(llmClient, toolRegistry, renderer, config.maxIterations());
 
-        // 创建对话历史，注入系统提示词
-        ConversationHistory history = new ConversationHistory(config.systemPrompt());
+        // 初始化 Skill 子系统
+        SkillRegistry skillRegistry = new SkillRegistry();
+        skillRegistry.scan();
+        SkillSessionState sessionState = new SkillSessionState();
+
+        SkillPromptBuilder promptBuilder = null;
+        if (!skillRegistry.isEmpty()) {
+            toolRegistry.register(new ActivateSkillTool(skillRegistry, sessionState));
+            promptBuilder = new SkillPromptBuilder(SystemPrompt.BASE, skillRegistry, sessionState);
+            System.out.println("Skills: 发现 " + skillRegistry.size() + " 个可用 skill");
+        }
+
+        // 确定初始 system prompt
+        String initialSystemPrompt = (promptBuilder != null)
+                ? promptBuilder.build()
+                : SystemPrompt.BASE;
+
+        // 创建对话历史和 ReAct 循环
+        ConversationHistory history = new ConversationHistory(initialSystemPrompt);
+        ReActLoop reactLoop = new ReActLoop(
+                llmClient, toolRegistry, renderer, config.maxIterations(), promptBuilder);
 
         System.out.println("模型: " + config.model());
         System.out.println("日志: " + logger.getLogFile());
         System.out.println("输入你的需求（输入 exit 退出）：");
         System.out.println();
 
-        // REPL 主循环：读取输入 → 执行 ReAct → 输出结果
+        // REPL 主循环
         Scanner scanner = new Scanner(System.in);
         while (true) {
             System.out.print("\033[1m> \033[0m");
@@ -57,7 +82,6 @@ public class Main {
                 break;
             }
 
-            // 将用户消息加入对话历史，然后启动 ReAct 循环
             history.addUserMessage(input);
             reactLoop.run(history);
             System.out.println();

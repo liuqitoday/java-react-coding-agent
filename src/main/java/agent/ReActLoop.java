@@ -1,5 +1,6 @@
 package agent;
 
+import agent.skills.SkillPromptBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -9,13 +10,14 @@ import com.google.gson.JsonParser;
  * ReAct（Reasoning + Acting）循环的核心编排器。
  *
  * 完整流程：
- * 1. 将 messages（对话历史）和 tools（工具定义）发送给 LLM
- * 2. 解析响应：如果包含 tool_calls，说明 LLM 决定调用工具
+ * 1. 每轮调用前，通过 SkillPromptBuilder 动态更新 system prompt（反映最新的 skill 状态）
+ * 2. 将 messages（对话历史）和 tools（工具定义）发送给 LLM
+ * 3. 解析响应：如果包含 tool_calls，说明 LLM 决定调用工具
  *    - 提取 content 字段作为 Thought（思考过程）
  *    - 逐个执行 tool_call，将结果以 role=tool 消息追加到历史
  *    - 再次调用 LLM，让它看到工具执行结果
- * 3. 如果响应不包含 tool_calls，说明 LLM 已得出最终答案，循环结束
- * 4. 设有 maxIterations 上限，防止无限循环
+ * 4. 如果响应不包含 tool_calls，说明 LLM 已得出最终答案，循环结束
+ * 5. 设有 maxIterations 上限，防止无限循环
  */
 public class ReActLoop {
 
@@ -23,13 +25,16 @@ public class ReActLoop {
     private final ToolRegistry toolRegistry;
     private final ConsoleRenderer renderer;
     private final int maxIterations;
+    private final SkillPromptBuilder promptBuilder;
 
     public ReActLoop(LLMClient llmClient, ToolRegistry toolRegistry,
-                     ConsoleRenderer renderer, int maxIterations) {
+                     ConsoleRenderer renderer, int maxIterations,
+                     SkillPromptBuilder promptBuilder) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.renderer = renderer;
         this.maxIterations = maxIterations;
+        this.promptBuilder = promptBuilder;
     }
 
     /**
@@ -41,6 +46,11 @@ public class ReActLoop {
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             renderer.renderSeparator();
+
+            // 每轮调用前动态更新 system prompt（反映最新的 skill 激活状态）
+            if (promptBuilder != null) {
+                history.updateSystemPrompt(promptBuilder.build());
+            }
 
             // 第一步：调用 LLM
             JsonObject response;
@@ -62,7 +72,7 @@ public class ReActLoop {
             }
 
             // 第三步：判断是否有工具调用
-            if (message.has("tool_calls") && message.getAsJsonArray("tool_calls").size() > 0) {
+            if (message.has("tool_calls") && !message.getAsJsonArray("tool_calls").isEmpty()) {
                 // 显示思考过程
                 renderer.renderThought(content);
 

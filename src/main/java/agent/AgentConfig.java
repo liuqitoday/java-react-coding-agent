@@ -14,7 +14,8 @@ import java.util.Properties;
  * - api.base-url    API 基础 URL，可替换为兼容的第三方服务
  * - api.model       模型名称（如 gpt-4o、claude-haiku-4-5 等）
  * - agent.max-iterations  ReAct 最大迭代次数，防止无限循环
- * - agent.system-prompt   系统提示词，定义 Agent 的角色和行为策略
+ *
+ * 注意：system prompt 是产品逻辑，不属于用户配置，定义在 {@link SystemPrompt} 中。
  */
 public class AgentConfig {
 
@@ -52,10 +53,5 @@ public class AgentConfig {
 
     public int maxIterations() {
         return Integer.parseInt(props.getProperty("agent.max-iterations", "15"));
-    }
-
-    public String systemPrompt() {
-        return props.getProperty("agent.system-prompt",
-                "你是一个编码助手 Agent。请使用可用的工具来完成用户的请求。");
     }
 }
