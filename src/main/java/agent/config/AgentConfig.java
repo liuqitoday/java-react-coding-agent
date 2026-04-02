@@ -1,4 +1,4 @@
-package agent;
+package agent.config;
 
 import java.io.IOException;
 import java.io.InputStream;

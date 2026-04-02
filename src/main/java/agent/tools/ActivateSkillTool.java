@@ -1,6 +1,5 @@
 package agent.tools;
 
-import agent.ToolResult;
 import agent.skills.SkillDescriptor;
 import agent.skills.SkillLoader;
 import agent.skills.SkillLoader.SkillContent;

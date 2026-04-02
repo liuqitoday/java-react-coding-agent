@@ -1,4 +1,4 @@
-package agent;
+package agent.render;
 
 /**
  * 终端渲染器：使用 ANSI 转义码为 ReAct 各步骤输出不同颜色。

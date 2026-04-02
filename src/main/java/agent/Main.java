@@ -1,9 +1,17 @@
 package agent;
 
+import agent.config.AgentConfig;
+import agent.core.ConversationHistory;
+import agent.core.ReActLoop;
+import agent.core.SystemPrompt;
+import agent.llm.LLMClient;
+import agent.llm.LLMLogger;
+import agent.render.ConsoleRenderer;
 import agent.skills.SkillPromptBuilder;
 import agent.skills.SkillRegistry;
 import agent.skills.SkillSessionState;
 import agent.tools.ActivateSkillTool;
+import agent.tools.ToolRegistry;
 
 import java.util.Scanner;
 

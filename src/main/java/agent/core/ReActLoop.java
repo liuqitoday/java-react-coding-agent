@@ -1,6 +1,10 @@
-package agent;
+package agent.core;
 
+import agent.llm.LLMClient;
+import agent.render.ConsoleRenderer;
 import agent.skills.SkillPromptBuilder;
+import agent.tools.ToolRegistry;
+import agent.tools.ToolResult;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;

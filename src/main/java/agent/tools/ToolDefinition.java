@@ -1,6 +1,5 @@
-package agent;
+package agent.tools;
 
-import agent.tools.Tool;
 import com.google.gson.JsonObject;
 
 /**

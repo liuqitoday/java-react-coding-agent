@@ -1,4 +1,4 @@
-package agent;
+package agent.tools;
 
 /**
  * 工具执行结果。

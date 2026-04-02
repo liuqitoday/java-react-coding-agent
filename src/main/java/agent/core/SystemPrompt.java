@@ -1,4 +1,4 @@
-package agent;
+package agent.core;
 
 /**
  * 基础系统提示词定义。
