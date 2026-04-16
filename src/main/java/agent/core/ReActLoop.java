@@ -2,7 +2,6 @@ package agent.core;
 
 import agent.llm.LLMClient;
 import agent.render.ConsoleRenderer;
-import agent.skills.SkillPromptBuilder;
 import agent.tools.ToolRegistry;
 import agent.tools.ToolResult;
 import com.google.gson.JsonArray;
@@ -14,7 +13,7 @@ import com.google.gson.JsonParser;
  * ReAct（Reasoning + Acting）循环的核心编排器。
  *
  * 完整流程：
- * 1. 每轮调用前，通过 SkillPromptBuilder 动态更新 system prompt（反映最新的 skill 状态）
+ * 1. 每轮调用前，通过 SystemPromptBuilder 动态更新 system prompt（反映最新的 skill 状态和项目上下文）
  * 2. 将 messages（对话历史）和 tools（工具定义）发送给 LLM
  * 3. 解析响应：如果包含 tool_calls，说明 LLM 决定调用工具
  *    - 提取 content 字段作为 Thought（思考过程）
@@ -29,11 +28,11 @@ public class ReActLoop {
     private final ToolRegistry toolRegistry;
     private final ConsoleRenderer renderer;
     private final int maxIterations;
-    private final SkillPromptBuilder promptBuilder;
+    private final SystemPromptBuilder promptBuilder;
 
     public ReActLoop(LLMClient llmClient, ToolRegistry toolRegistry,
                      ConsoleRenderer renderer, int maxIterations,
-                     SkillPromptBuilder promptBuilder) {
+                     SystemPromptBuilder promptBuilder) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.renderer = renderer;
@@ -51,10 +50,8 @@ public class ReActLoop {
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             renderer.renderSeparator();
 
-            // 每轮调用前动态更新 system prompt（反映最新的 skill 激活状态）
-            if (promptBuilder != null) {
-                history.updateSystemPrompt(promptBuilder.build());
-            }
+            // 每轮调用前动态更新 system prompt（反映最新的 skill 激活状态和项目上下文）
+            history.updateSystemPrompt(promptBuilder.build());
 
             // 第一步：调用 LLM
             JsonObject response;

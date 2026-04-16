@@ -4,10 +4,12 @@ import agent.config.AgentConfig;
 import agent.core.ConversationHistory;
 import agent.core.ReActLoop;
 import agent.core.SystemPrompt;
+import agent.core.SystemPromptBuilder;
 import agent.llm.LLMClient;
 import agent.llm.LLMLogger;
+import agent.memory.AgentsFileLoader;
+import agent.memory.ProjectContext;
 import agent.render.ConsoleRenderer;
-import agent.skills.SkillPromptBuilder;
 import agent.skills.SkillRegistry;
 import agent.skills.SkillSessionState;
 import agent.tools.ActivateSkillTool;
@@ -20,7 +22,8 @@ import java.util.Scanner;
  *
  * 组装流程：
  * AgentConfig → LLMLogger → LLMClient → ToolRegistry
- *            → SkillRegistry → SkillSessionState → SkillPromptBuilder
+ *            → AgentsFileLoader → ProjectContext
+ *            → SkillRegistry → SkillSessionState → SystemPromptBuilder
  *            → ConsoleRenderer → ReActLoop
  */
 public class Main {
@@ -46,25 +49,33 @@ public class Main {
         ToolRegistry toolRegistry = new ToolRegistry();
         ConsoleRenderer renderer = new ConsoleRenderer();
 
+        // 加载项目上下文（AGENTS.md）
+        AgentsFileLoader agentsLoader = new AgentsFileLoader();
+        ProjectContext projectContext = agentsLoader.load();
+        if (!projectContext.isEmpty()) {
+            System.out.println("项目上下文: 加载了 " + projectContext.loadedFiles().size()
+                    + " 个 AGENTS.md 文件");
+            if (projectContext.truncated()) {
+                System.out.println("  警告：项目上下文超过 32KB 限制，已截断");
+            }
+        }
+
         // 初始化 Skill 子系统
         SkillRegistry skillRegistry = new SkillRegistry();
         skillRegistry.scan();
         SkillSessionState sessionState = new SkillSessionState();
 
-        SkillPromptBuilder promptBuilder = null;
         if (!skillRegistry.isEmpty()) {
             toolRegistry.register(new ActivateSkillTool(skillRegistry, sessionState));
-            promptBuilder = new SkillPromptBuilder(SystemPrompt.BASE, skillRegistry, sessionState);
             System.out.println("Skills: 发现 " + skillRegistry.size() + " 个可用 skill");
         }
 
-        // 确定初始 system prompt
-        String initialSystemPrompt = (promptBuilder != null)
-                ? promptBuilder.build()
-                : SystemPrompt.BASE;
+        // 创建 SystemPromptBuilder（统一管理 base prompt + 项目上下文 + skills）
+        SystemPromptBuilder promptBuilder = new SystemPromptBuilder(
+                SystemPrompt.BASE, projectContext, skillRegistry, sessionState);
 
         // 创建对话历史和 ReAct 循环
-        ConversationHistory history = new ConversationHistory(initialSystemPrompt);
+        ConversationHistory history = new ConversationHistory(promptBuilder.build());
         ReActLoop reactLoop = new ReActLoop(
                 llmClient, toolRegistry, renderer, config.maxIterations(), promptBuilder);
 
