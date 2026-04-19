@@ -10,6 +10,8 @@ import agent.llm.LLMClient;
 import agent.llm.LLMLogger;
 import agent.memory.AgentsFileLoader;
 import agent.memory.ProjectContext;
+import agent.permission.PermissionGate;
+import agent.permission.PermissionPolicy;
 import agent.render.ConsoleRenderer;
 import agent.skills.SkillRegistry;
 import agent.skills.SkillSessionState;
@@ -18,6 +20,7 @@ import agent.tools.ActivateSkillTool;
 import agent.tools.TodoWriteTool;
 import agent.tools.ToolRegistry;
 
+import java.nio.file.Path;
 import java.util.Scanner;
 
 /**
@@ -82,6 +85,15 @@ public class Main {
         // 让 Prompt Cache 前缀匹配能稳定命中（详见 docs/prompt-cache-aware-design.md）
         StateReminder stateReminder = new StateReminder(todoList, sessionState);
 
+        // 加载权限策略（permissions.json 不存在则为空策略：所有工具 ALLOW）
+        PermissionPolicy permissionPolicy = PermissionPolicy.load(Path.of("permissions.json"));
+        // Scanner 提前创建：PermissionGate 的 ASK 交互和下面的 REPL 必须共用同一个实例
+        Scanner scanner = new Scanner(System.in);
+        PermissionGate permissionGate = new PermissionGate(permissionPolicy, renderer, scanner);
+        if (permissionPolicy.totalRules() > 0) {
+            System.out.println("权限策略: 加载了 " + permissionPolicy.totalRules() + " 条规则");
+        }
+
         // 创建 SystemPromptBuilder（只放 Session 内静态的内容：base + 项目上下文 + skill 目录）
         SystemPromptBuilder promptBuilder = new SystemPromptBuilder(
                 SystemPrompt.BASE, projectContext, skillRegistry);
@@ -89,15 +101,15 @@ public class Main {
         // 创建对话历史和 ReAct 循环
         ConversationHistory history = new ConversationHistory(promptBuilder.build());
         ReActLoop reactLoop = new ReActLoop(
-                llmClient, toolRegistry, renderer, config.maxIterations(), stateReminder);
+                llmClient, toolRegistry, renderer, config.maxIterations(),
+                stateReminder, permissionGate);
 
         System.out.println("模型: " + config.model());
         System.out.println("日志: " + logger.getLogFile());
         System.out.println("输入你的需求（输入 exit 退出）：");
         System.out.println();
 
-        // REPL 主循环
-        Scanner scanner = new Scanner(System.in);
+        // REPL 主循环（复用上面已创建的 scanner）
         while (true) {
             System.out.print("\033[1m> \033[0m");
             if (!scanner.hasNextLine()) {

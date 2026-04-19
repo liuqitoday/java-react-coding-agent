@@ -43,6 +43,18 @@ public class ConsoleRenderer {
         System.out.println(MAGENTA + BOLD + "[Answer]  " + RESET + answer);
     }
 
+    public void renderPermissionPrompt(String toolName, String argsPreview) {
+        System.out.println();
+        System.out.println(MAGENTA + BOLD + "[审批]    " + RESET + MAGENTA
+                + "即将执行工具：" + toolName + RESET);
+        System.out.println(DIM + "参数：" + argsPreview + RESET);
+        System.out.print(BOLD + "允许吗？(y/N): " + RESET);
+    }
+
+    public void renderPermissionDenial(String reason) {
+        System.out.println(RED + BOLD + "[拒绝]    " + RESET + RED + reason + RESET);
+    }
+
     public void renderError(String error) {
         System.out.println(RED + BOLD + "[Error]   " + RESET + RED + error + RESET);
     }

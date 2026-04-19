@@ -1,6 +1,7 @@
 package agent.core;
 
 import agent.llm.LLMClient;
+import agent.permission.PermissionGate;
 import agent.render.ConsoleRenderer;
 import agent.tools.ToolRegistry;
 import agent.tools.ToolResult;
@@ -30,15 +31,17 @@ public class ReActLoop {
     private final ConsoleRenderer renderer;
     private final int maxIterations;
     private final StateReminder stateReminder;
+    private final PermissionGate gate;
 
     public ReActLoop(LLMClient llmClient, ToolRegistry toolRegistry,
                      ConsoleRenderer renderer, int maxIterations,
-                     StateReminder stateReminder) {
+                     StateReminder stateReminder, PermissionGate gate) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.renderer = renderer;
         this.maxIterations = maxIterations;
         this.stateReminder = stateReminder;
+        this.gate = gate;
     }
 
     /**
@@ -106,7 +109,11 @@ public class ReActLoop {
                         continue;
                     }
 
-                    ToolResult result = toolRegistry.execute(toolName, args);
+                    // 权限前置检查：命中 deny 或 ASK 被用户拒绝时，直接以错误结果替代工具执行
+                    String denialReason = gate.check(toolName, args);
+                    ToolResult result = (denialReason != null)
+                            ? ToolResult.error(denialReason)
+                            : toolRegistry.execute(toolName, args);
                     renderer.renderObservation(result.output());
 
                     // 本轮最后一个 tool_result 末尾附加 <system-reminder>——注入动态状态
