@@ -3,6 +3,7 @@ package agent;
 import agent.config.AgentConfig;
 import agent.core.ConversationHistory;
 import agent.core.ReActLoop;
+import agent.core.StateReminder;
 import agent.core.SystemPrompt;
 import agent.core.SystemPromptBuilder;
 import agent.llm.LLMClient;
@@ -12,7 +13,9 @@ import agent.memory.ProjectContext;
 import agent.render.ConsoleRenderer;
 import agent.skills.SkillRegistry;
 import agent.skills.SkillSessionState;
+import agent.todo.TodoList;
 import agent.tools.ActivateSkillTool;
+import agent.tools.TodoWriteTool;
 import agent.tools.ToolRegistry;
 
 import java.util.Scanner;
@@ -70,14 +73,23 @@ public class Main {
             System.out.println("Skills: 发现 " + skillRegistry.size() + " 个可用 skill");
         }
 
-        // 创建 SystemPromptBuilder（统一管理 base prompt + 项目上下文 + skills）
+        // 初始化 Todo 子系统（LLM 的外部工作记忆）
+        TodoList todoList = new TodoList();
+        toolRegistry.register(new TodoWriteTool(todoList));
+
+        // 会话动态状态摘要：把每轮可能变化的内容（todos / 已激活 skills）
+        // 以 <system-reminder> 形式注入到 tool_result 末尾——这样保持 system message 静态，
+        // 让 Prompt Cache 前缀匹配能稳定命中（详见 docs/prompt-cache-aware-design.md）
+        StateReminder stateReminder = new StateReminder(todoList, sessionState);
+
+        // 创建 SystemPromptBuilder（只放 Session 内静态的内容：base + 项目上下文 + skill 目录）
         SystemPromptBuilder promptBuilder = new SystemPromptBuilder(
-                SystemPrompt.BASE, projectContext, skillRegistry, sessionState);
+                SystemPrompt.BASE, projectContext, skillRegistry);
 
         // 创建对话历史和 ReAct 循环
         ConversationHistory history = new ConversationHistory(promptBuilder.build());
         ReActLoop reactLoop = new ReActLoop(
-                llmClient, toolRegistry, renderer, config.maxIterations(), promptBuilder);
+                llmClient, toolRegistry, renderer, config.maxIterations(), stateReminder);
 
         System.out.println("模型: " + config.model());
         System.out.println("日志: " + logger.getLogFile());
