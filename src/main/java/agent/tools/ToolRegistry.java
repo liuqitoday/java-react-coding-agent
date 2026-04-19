@@ -23,6 +23,7 @@ public class ToolRegistry {
     public ToolRegistry() {
         register(new ReadFileTool());
         register(new WriteFileTool());
+        register(new EditFileTool());
         register(new ListFilesTool());
         register(new ExecuteCommandTool());
     }
