@@ -3,6 +3,7 @@ package agent.core;
 import agent.llm.LLMClient;
 import agent.permission.PermissionGate;
 import agent.render.ConsoleRenderer;
+import agent.todo.TodoList;
 import agent.tools.ToolRegistry;
 import agent.tools.ToolResult;
 import com.google.gson.JsonArray;
@@ -32,16 +33,19 @@ public class ReActLoop {
     private final int maxIterations;
     private final StateReminder stateReminder;
     private final PermissionGate gate;
+    private final TodoList todoList;
 
     public ReActLoop(LLMClient llmClient, ToolRegistry toolRegistry,
                      ConsoleRenderer renderer, int maxIterations,
-                     StateReminder stateReminder, PermissionGate gate) {
+                     StateReminder stateReminder, PermissionGate gate,
+                     TodoList todoList) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.renderer = renderer;
         this.maxIterations = maxIterations;
         this.stateReminder = stateReminder;
         this.gate = gate;
+        this.todoList = todoList;
     }
 
     /**
@@ -103,9 +107,9 @@ public class ReActLoop {
                     try {
                         args = JsonParser.parseString(argsString).getAsJsonObject();
                     } catch (Exception e) {
-                        String errorMsg = "工具参数解析失败：" + e.getMessage();
-                        renderer.renderObservation(errorMsg);
-                        history.addToolResult(toolCallId, maybeAppendReminder(errorMsg, isLast));
+                        ToolResult errorResult = ToolResult.error("工具参数解析失败：" + e.getMessage());
+                        renderer.renderObservation(toolName, errorResult);
+                        history.addToolResult(toolCallId, maybeAppendReminder(errorResult.output(), isLast));
                         continue;
                     }
 
@@ -114,7 +118,10 @@ public class ReActLoop {
                     ToolResult result = (denialReason != null)
                             ? ToolResult.error(denialReason)
                             : toolRegistry.execute(toolName, args);
-                    renderer.renderObservation(result.output());
+                    renderer.renderObservation(toolName, result);
+                    if (result.success() && "todo_write".equals(toolName)) {
+                        renderer.renderTodo(todoList);
+                    }
 
                     // 本轮最后一个 tool_result 末尾附加 <system-reminder>——注入动态状态
                     history.addToolResult(toolCallId, maybeAppendReminder(result.output(), isLast));
@@ -127,6 +134,7 @@ public class ReActLoop {
             // 没有工具调用——这是最终回答
             if (content != null) {
                 renderer.renderFinalAnswer(content);
+                clearCompletedTodos();
             }
             return;
         }
@@ -142,5 +150,11 @@ public class ReActLoop {
      */
     private String maybeAppendReminder(String content, boolean isLast) {
         return isLast ? content + stateReminder.buildReminder() : content;
+    }
+
+    private void clearCompletedTodos() {
+        if (todoList.allCompleted()) {
+            todoList.clear();
+        }
     }
 }

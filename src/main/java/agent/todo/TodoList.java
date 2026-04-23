@@ -8,7 +8,7 @@ import java.util.List;
  *
  * 本质是"LLM 的外部工作记忆"：
  * - LLM 通过 todo_write 工具把自己拆分出的任务写进来
- * - SystemPromptBuilder 在每轮调用前读取这份列表，注入 system prompt
+ * - Agent 在后续轮次通过 StateReminder 把这份列表注入给模型
  * - LLM 持续看到自己的计划 → 规划行为被强化
  *
  * Session 内可变，整个 Agent 生命周期共享一份实例（与 SkillSessionState 模式对齐）。
@@ -36,9 +36,18 @@ public class TodoList {
         return items.size();
     }
 
+    public void clear() {
+        items.clear();
+    }
+
+    public boolean allCompleted() {
+        return !items.isEmpty()
+                && items.stream().allMatch(item -> TodoItem.COMPLETED.equals(item.status()));
+    }
+
     /**
-     * 生成 system prompt 中的"当前任务清单"区段。
-     * 列表为空时返回空串，不占用 prompt 空间。
+     * 生成 reminder 中的"当前任务清单"区段。
+     * 列表为空时返回空串，不占用额外上下文。
      *
      * 渲染规则：
      * - completed: [x] + content
@@ -49,18 +58,32 @@ public class TodoList {
         if (items.isEmpty()) {
             return "";
         }
+        return "## 当前任务清单\n\n" + renderItems();
+    }
+
+    /** 渲染当前清单条目，用于 prompt 注入和控制台展示。 */
+    public String renderItems() {
+        if (items.isEmpty()) {
+            return "";
+        }
+
         StringBuilder sb = new StringBuilder();
-        sb.append("## 当前任务清单\n\n");
-        for (TodoItem item : items) {
-            String marker = switch (item.status()) {
-                case TodoItem.COMPLETED -> "[x]";
-                case TodoItem.IN_PROGRESS -> "[~]";
-                default -> "[ ]";
-            };
-            sb.append(marker).append(" ");
-            sb.append(TodoItem.IN_PROGRESS.equals(item.status()) ? item.activeForm() : item.content());
-            sb.append("\n");
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                sb.append("\n");
+            }
+            sb.append(renderItem(items.get(i)));
         }
         return sb.toString();
+    }
+
+    private String renderItem(TodoItem item) {
+        String marker = switch (item.status()) {
+            case TodoItem.COMPLETED -> "[x]";
+            case TodoItem.IN_PROGRESS -> "[~]";
+            default -> "[ ]";
+        };
+        String content = TodoItem.IN_PROGRESS.equals(item.status()) ? item.activeForm() : item.content();
+        return marker + " " + content;
     }
 }

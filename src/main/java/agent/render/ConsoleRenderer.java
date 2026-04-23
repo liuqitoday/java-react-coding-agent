@@ -1,5 +1,8 @@
 package agent.render;
 
+import agent.todo.TodoList;
+import agent.tools.ToolResult;
+
 /**
  * 终端渲染器：使用 ANSI 转义码为 ReAct 各步骤输出不同颜色。
  *
@@ -32,10 +35,25 @@ public class ConsoleRenderer {
         System.out.println(YELLOW + BOLD + "[Action]  " + RESET + YELLOW + toolName + RESET + DIM + "(" + args + ")" + RESET);
     }
 
-    public void renderObservation(String result) {
-        // 多行结果缩进对齐，使输出更整齐
-        String indented = result.replace("\n", "\n           ");
-        System.out.println(GREEN + BOLD + "[Observe] " + RESET + GREEN + indented + RESET);
+    public void renderObservation(String toolName, ToolResult result) {
+        String color = result.success() ? GREEN : RED;
+        String status = result.success() ? "ok" : "error";
+        String content = sanitizeObservation(result.output(), result.success());
+
+        System.out.println(color + BOLD + "[Observe] " + RESET + color + toolName + " [" + status + "]" + RESET);
+        for (String line : content.split("\n", -1)) {
+            System.out.println(color + "          " + line + RESET);
+        }
+    }
+
+    public void renderTodo(TodoList todoList) {
+        System.out.println(BOLD + "[Todo]    " + RESET + (todoList.isEmpty() ? "（空）" : ""));
+        if (todoList.isEmpty()) {
+            return;
+        }
+        for (String line : todoList.renderItems().split("\n")) {
+            System.out.println("          " + line);
+        }
     }
 
     public void renderFinalAnswer(String answer) {
@@ -65,5 +83,16 @@ public class ConsoleRenderer {
 
     public void renderSeparator() {
         System.out.println(DIM + "─".repeat(60) + RESET);
+    }
+
+    private String sanitizeObservation(String output, boolean success) {
+        if (output == null || output.isBlank()) {
+            return "（无输出）";
+        }
+
+        if (!success && output.startsWith("ERROR: ")) {
+            return output.substring("ERROR: ".length());
+        }
+        return output;
     }
 }

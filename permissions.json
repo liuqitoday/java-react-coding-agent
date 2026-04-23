@@ -1,0 +1,15 @@
+{
+  "deny": [
+    "execute_command:rm -rf",
+    "execute_command:dd if=",
+    "execute_command:mkfs",
+    "execute_command:> /dev/sd",
+    "execute_command::(){ :|:& };:"
+  ],
+  "ask": [
+    "execute_command:",
+    "write_file:/etc/",
+    "write_file:.ssh/",
+    "edit_file:/etc/"
+  ]
+}

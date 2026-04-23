@@ -102,7 +102,7 @@ public class Main {
         ConversationHistory history = new ConversationHistory(promptBuilder.build());
         ReActLoop reactLoop = new ReActLoop(
                 llmClient, toolRegistry, renderer, config.maxIterations(),
-                stateReminder, permissionGate);
+                stateReminder, permissionGate, todoList);
 
         System.out.println("模型: " + config.model());
         System.out.println("日志: " + logger.getLogFile());

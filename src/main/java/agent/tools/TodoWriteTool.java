@@ -14,7 +14,7 @@ import java.util.List;
  *
  * 设计定位——作为"外部工作记忆"：
  * - LLM 主动把自己的任务拆分写进 TodoList
- * - Agent 在每轮调用前把列表注入 system prompt，LLM 持续看到自己的计划
+ * - Agent 在后续轮次通过 StateReminder 把列表注入给模型，LLM 持续看到自己的计划
  * - 这个工具从根本上改变了 LLM 的规划行为：它开始"想清楚再做"
  *
  * 为什么单工具全量替换而不是 create/update 多工具？
@@ -42,7 +42,7 @@ public class TodoWriteTool implements Tool {
     @Override
     public String description() {
         return "Manage the task list for the current session by replacing the entire todo list in one call. "
-                + "Use this to plan multi-step tasks and track progress. Each todo has: "
+                + "Use this for non-trivial multi-step tasks to plan work and track progress. Each todo has: "
                 + "content (imperative form, e.g., 'Create index.html'), "
                 + "activeForm (present-continuous form shown while in progress, e.g., 'Creating index.html'), "
                 + "and status (pending / in_progress / completed). "
@@ -161,7 +161,7 @@ public class TodoWriteTool implements Tool {
         // 全量替换
         todoList.replace(newItems);
 
-        // 返回统计概览，让 LLM 确认更新成功并看到当前分布
+        // 返回简短确认。完整 todo 状态由宿主从 TodoList 渲染，并通过 StateReminder 注入模型。
         int pending = 0, inProgress = 0, completed = 0;
         for (TodoItem item : newItems) {
             switch (item.status()) {
@@ -171,8 +171,13 @@ public class TodoWriteTool implements Tool {
             }
         }
 
-        return ToolResult.success("Todo 列表已更新：共 " + newItems.size() + " 项（"
-                + pending + " pending / " + inProgress + " in_progress / " + completed + " completed）");
+        if (newItems.isEmpty()) {
+            return ToolResult.success("Todo 列表已清空");
+        }
+
+        String summary = "Todo 列表已更新：共 " + newItems.size() + " 项（"
+                + pending + " pending / " + inProgress + " in_progress / " + completed + " completed）";
+        return ToolResult.success(summary);
     }
 
     /** 安全读取字符串字段：缺失或 null 返回 null，避免 getAsString() 抛异常。 */
