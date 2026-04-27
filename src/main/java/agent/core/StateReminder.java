@@ -4,18 +4,20 @@ import agent.skills.SkillSessionState;
 import agent.todo.TodoList;
 
 /**
- * 会话动态状态摘要（System Reminder）。
+ * 会话动态状态摘要。
  *
  * 【解决什么问题】
- * TodoList、已激活 skill 等"每轮都可能变化"的状态，如果拼进 system prompt，
- * 会让 system message 的前缀每轮都不同。由于 Prompt Caching 是字节级前缀匹配，
- * system 一变 → 整个请求从 system message 往后的 KV-Cache 全部失效 → 成本飙升、首 token 延迟变大。
+ * TodoList、已激活 skill 等"每轮都可能变化"的状态，不能拼进 system prompt
+ * （会破坏 Prompt Cache 的前缀匹配），也不能烘焙进 tool_result（会污染历史、浪费 token）。
  *
- * 【采用方案】
- * 把动态状态作为 {@code <system-reminder>} 块追加到本轮最后一条 tool_result 的 content 末尾。
- * tool_result 本来就是每轮新增的消息，在它末尾附加内容不会破坏前面已缓存的 prefix。
+ * 【采用方案：Ephemeral Injection（临时注入）】
+ * 本类生成的状态摘要，由 ReActLoop 在构建 API 请求时作为临时消息追加到 messages 末尾。
+ * 关键点：这条消息**不写入持久化的对话历史**，下次请求时会被最新版本替换。
  *
- * 这是 Claude Code 在实际 session 里能观察到的设计模式，背后的原理是 cache-aware context engineering。
+ * 好处：
+ * - 历史消息干净，不累积过期状态 → 节省 token
+ * - 只在 messages 末尾追加 → 不破坏前缀缓存（缓存是前缀匹配，末尾变化不影响前面）
+ * - 每次请求只携带当前最新状态 → 信息密度最高
  */
 public class StateReminder {
 
@@ -28,7 +30,7 @@ public class StateReminder {
     }
 
     /**
-     * 生成要附加到 tool_result 末尾的 {@code <system-reminder>} 块。
+     * 生成要临时注入到本轮请求末尾的 {@code <system-reminder>} 块。
      * 所有状态都为空时返回空字符串——不追加任何内容，连包裹标签都不加。
      */
     public String buildReminder() {

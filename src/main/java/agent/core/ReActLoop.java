@@ -14,16 +14,21 @@ import com.google.gson.JsonParser;
  * ReAct（Reasoning + Acting）循环的核心编排器。
  *
  * 完整流程：
- * 1. System prompt 在 ConversationHistory 构造时一次性注入，Session 内保持不变——
- *    动态状态通过 StateReminder 走 tool_result 尾部注入，最大化 Prompt Cache 命中率
+ * 1. System prompt 在 ConversationHistory 构造时一次性注入，Session 内保持不变
  * 2. 每轮把 messages（对话历史）和 tools（工具定义）发送给 LLM
  * 3. 解析响应：如果包含 tool_calls，说明 LLM 决定调用工具
  *    - 提取 content 字段作为 Thought（思考过程）
- *    - 逐个执行 tool_call
- *    - 本轮最后一个 tool_result 末尾追加 {@code <system-reminder>} 注入当前动态状态
- *    - 将所有 tool_result 消息追加到历史，再次调用 LLM
+ *    - 逐个执行 tool_call，将 tool_result 干净地加入历史（不附加任何额外内容）
+ *    - 再次调用 LLM 时，通过 ephemeral injection 临时注入当前动态状态
  * 4. 如果响应不包含 tool_calls，说明 LLM 已得出最终答案，循环结束
  * 5. 设有 maxIterations 上限，防止无限循环
+ *
+ * 【动态状态注入策略】
+ * TodoList、已激活 Skill 等动态状态通过 StateReminder 生成，
+ * 在构建 API 请求时作为临时消息追加到 messages 末尾，**不写入持久化的对话历史**。
+ * 这样做的好处：
+ * - 历史消息干净，不累积过期状态 → 节省 token
+ * - 临时消息在 messages 末尾 → 不破坏前缀缓存
  */
 public class ReActLoop {
 
@@ -58,13 +63,13 @@ public class ReActLoop {
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             renderer.renderSeparator();
 
-            // 注意：这里不再调用 history.updateSystemPrompt()——system prompt 是启动时
-            // 就定格的不变量。动态状态通过 tool_result 尾部的 <system-reminder> 注入。
-
             // 第一步：调用 LLM
+            // 动态状态（TodoList 等）通过 ephemeral injection 临时注入到 messages 末尾，
+            // 不写入持久历史——既避免污染历史消息，也不影响前缀缓存。
             JsonObject response;
             try {
-                response = llmClient.chatCompletion(history.toJsonArray(), tools);
+                response = llmClient.chatCompletion(
+                        history.toJsonArray(stateReminder.buildReminder()), tools);
             } catch (Exception e) {
                 renderer.renderError("LLM 调用失败：" + e.getMessage());
                 return;
@@ -100,7 +105,6 @@ public class ReActLoop {
 
                     renderer.renderAction(toolName, argsString);
 
-                    boolean isLast = (i == total - 1);
 
                     // 解析工具参数
                     JsonObject args;
@@ -109,7 +113,7 @@ public class ReActLoop {
                     } catch (Exception e) {
                         ToolResult errorResult = ToolResult.error("工具参数解析失败：" + e.getMessage());
                         renderer.renderObservation(toolName, errorResult);
-                        history.addToolResult(toolCallId, maybeAppendReminder(errorResult.output(), isLast));
+                        history.addToolResult(toolCallId, errorResult.output());
                         continue;
                     }
 
@@ -123,11 +127,11 @@ public class ReActLoop {
                         renderer.renderTodo(todoList);
                     }
 
-                    // 本轮最后一个 tool_result 末尾附加 <system-reminder>——注入动态状态
-                    history.addToolResult(toolCallId, maybeAppendReminder(result.output(), isLast));
+                    // tool_result 干净入历史，不附加任何额外内容
+                    history.addToolResult(toolCallId, result.output());
                 }
 
-                // 继续循环——LLM 将在下一轮看到工具执行结果 + 附带的 reminder
+                // 继续循环——下一轮调用 LLM 时会通过 ephemeral injection 注入最新状态
                 continue;
             }
 
@@ -144,14 +148,6 @@ public class ReActLoop {
         renderer.renderIterationWarning(maxIterations);
     }
 
-    /**
-     * 本轮最后一条 tool_result 才追加动态状态 reminder；其他原样返回。
-     * 只注入到最后一条的理由：避免同一轮多个 tool_call 时重复冗余的 reminder 片段，
-     * LLM 顺序读到最后一条就能拿到当前最新状态，信息密度最高。
-     */
-    private String maybeAppendReminder(String content, boolean isLast) {
-        return isLast ? content + stateReminder.buildReminder() : content;
-    }
 
     private void clearCompletedTodos() {
         if (todoList.allCompleted()) {

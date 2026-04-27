@@ -6,8 +6,9 @@ package agent.core;
  * System prompt 是产品逻辑的一部分，与代码中的工具集、行为策略强绑定，
  * 因此定义在代码中而非配置文件里。
  *
- * 这里定义的是"基础提示词"，运行时会由 SkillPromptBuilder 在此基础上
- * 动态拼接 skill 目录和激活状态，组成最终发给模型的 system message。
+ * 这里定义的是"基础提示词"。运行时会由 {@link SystemPromptBuilder} 在此基础上
+ * 追加 Session 内静态的项目上下文和 skill 目录，构成一次构建、全 Session 复用的
+ * system message。
  */
 public final class SystemPrompt {
 

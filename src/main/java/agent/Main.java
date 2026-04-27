@@ -81,8 +81,8 @@ public class Main {
         toolRegistry.register(new TodoWriteTool(todoList));
 
         // 会话动态状态摘要：把每轮可能变化的内容（todos / 已激活 skills）
-        // 以 <system-reminder> 形式注入到 tool_result 末尾——这样保持 system message 静态，
-        // 让 Prompt Cache 前缀匹配能稳定命中（详见 docs/prompt-cache-aware-design.md）
+        // 作为临时 developer message 追加到请求末尾，不写入持久历史——
+        // 这样保持 system message 静态，让 Prompt Cache 前缀匹配能稳定命中
         StateReminder stateReminder = new StateReminder(todoList, sessionState);
 
         // 加载权限策略（permissions.json 不存在则为空策略：所有工具 ALLOW）

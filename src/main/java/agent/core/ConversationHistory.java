@@ -9,30 +9,21 @@ import java.util.List;
 /**
  * 对话历史管理器。
  *
- * 维护发送给 LLM 的 messages 数组，包含四种角色的消息：
- * - system:    系统提示词，由 SkillPromptBuilder 动态生成（每次请求前更新）
- * - user:      用户的输入
- * - assistant: LLM 的回复（可能包含 tool_calls 字段）
- * - tool:      工具执行结果（必须携带 tool_call_id 与 assistant 的 tool_call 对应）
+ * 持久化保存会话历史中的 user / assistant / tool 消息。
  *
- * system message 与对话消息分开管理：对话消息只包含 user/assistant/tool，
- * system message 在 toJsonArray() 时动态拼接在最前面。
- * 这样 system prompt 可以随 skill 状态变化而动态更新。
+ * system prompt 作为 Session 级不变量，不存进 messages 列表，而是在序列化请求时
+ * 始终拼接在最前面。当前回合的动态状态（TodoList、已激活 Skill）如需注入，
+ * 也只会在构建请求时以临时 developer message 追加到末尾，不写回持久历史。
  */
 public class ConversationHistory {
 
     /** 对话消息（不含 system message） */
     private final List<JsonObject> messages = new ArrayList<>();
 
-    /** 当前 system prompt，可动态更新 */
-    private String systemPrompt;
+    /** Session 级静态 system prompt。 */
+    private final String systemPrompt;
 
     public ConversationHistory(String systemPrompt) {
-        this.systemPrompt = systemPrompt;
-    }
-
-    /** 更新 system prompt（每次 LLM 调用前由 SkillPromptBuilder 调用）。 */
-    public void updateSystemPrompt(String systemPrompt) {
         this.systemPrompt = systemPrompt;
     }
 
@@ -60,9 +51,22 @@ public class ConversationHistory {
 
     /**
      * 将 system message + 对话消息转为 JsonArray，用于 API 请求的 messages 字段。
-     * system message 始终在最前面，内容为最新的 systemPrompt。
+     * system message 始终在最前面，内容为 Session 固定的 systemPrompt。
      */
     public JsonArray toJsonArray() {
+        return toJsonArray(null);
+    }
+
+    /**
+     * 构建包含临时上下文的 messages 数组。
+     *
+     * ephemeralContext 作为最后一条消息追加到数组末尾，但**不会写入 messages 列表**。
+     * 下次调用时，它会被最新版本替换——历史消息始终干净，不会累积过期状态。
+     *
+     * 放在末尾不影响 Prompt Cache：缓存是前缀匹配，末尾的新内容本来就是 cache miss，
+     * 前面的 system + 历史消息仍然完整命中缓存。
+     */
+    public JsonArray toJsonArray(String ephemeralContext) {
         JsonArray array = new JsonArray();
 
         // system message 始终在最前面
@@ -74,6 +78,18 @@ public class ConversationHistory {
         for (JsonObject msg : messages) {
             array.add(msg);
         }
+
+        // 临时注入动态状态（TodoList、已激活 Skill 等），不写入持久历史。
+        // 使用 developer 角色：语义上这是 harness 注入的上下文，不是用户输入。
+        // 注意：developer 角色是 OpenAI 新模型支持的，部分兼容 API 可能不支持，
+        //       如遇到问题可改回 "user" 并用 XML 标签区分。
+        if (ephemeralContext != null && !ephemeralContext.isEmpty()) {
+            JsonObject ctx = new JsonObject();
+            ctx.addProperty("role", "developer");
+            ctx.addProperty("content", ephemeralContext);
+            array.add(ctx);
+        }
+
         return array;
     }
 }

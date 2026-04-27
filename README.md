@@ -43,8 +43,8 @@ code-agent-native-demo/
     │   ├── ReActLoop.java               # 核心：ReAct 循环编排
     │   ├── ConversationHistory.java     # 管理对话消息列表
     │   ├── SystemPrompt.java            # 系统提示词常量
-    │   ├── SystemPromptBuilder.java     # 按激活 skill 动态拼装 system prompt
-    │   └── StateReminder.java           # 动态状态注入（todo、已用迭代数）
+    │   ├── SystemPromptBuilder.java     # 组装 Session 静态 system prompt
+    │   └── StateReminder.java           # 动态状态注入（todo、已激活 skill）
     ├── llm/
     │   ├── LLMClient.java               # HttpClient 封装，调用 chat completions
     │   └── LLMLogger.java               # 请求/响应日志记录
@@ -302,7 +302,7 @@ LLM 决定调用工具时，响应中会包含：
 | `PermissionPolicy` | 从 `permissions.json` 加载权限规则 |
 | `SkillRegistry` | skill 注册与查找，支持从 `.claude/agents/` 加载外部 skill |
 | `TodoList` | 多步骤任务跟踪，配合 `TodoWriteTool` 使用 |
-| `StateReminder` | 动态状态注入（todo 列表、已用迭代数），附加到 tool_result 末尾 |
+| `StateReminder` | 动态状态注入（todo 列表、已激活 skill），作为临时消息追加到请求末尾 |
 
 ## 如何扩展新工具
 
