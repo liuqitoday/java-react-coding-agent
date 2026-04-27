@@ -44,7 +44,8 @@ public class AgentConfig {
     }
 
     public String baseUrl() {
-        return props.getProperty("api.base-url", "https://api.openai.com/v1");
+        String url = props.getProperty("api.base-url", "");
+        return url.isBlank() ? "https://api.openai.com/v1" : url;
     }
 
     public String model() {

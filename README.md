@@ -7,7 +7,7 @@
 市面上的 Agent 框架（LangChain、Semantic Kernel 等）封装层次很深，初学者很难理解 Agent 到底是怎么工作的。本项目的目标是：
 
 - **零框架依赖**：除了 JSON 解析（Gson），不引入任何 AI/Agent 框架
-- **代码即文档**：14 个 Java 文件，每个都短小清晰，直接阅读源码就能理解原理
+- **代码即文档**：33 个 Java 文件，按职责分包（core / tools / permission / skills / todo），直接阅读源码就能理解原理
 - **完整闭环**：从用户输入 → LLM 推理 → 工具调用 → 结果反馈 → 最终回答，覆盖 Agent 的核心机制
 
 ## ReAct 模式是什么？
@@ -37,20 +37,47 @@ code-agent-native-demo/
 ├── README.md
 └── src/main/java/agent/
     ├── Main.java                        # 入口：REPL 交互循环
-    ├── AgentConfig.java                 # 加载 agent.properties 配置
-    ├── LLMClient.java                   # HttpClient 封装，调用 chat completions
-    ├── ReActLoop.java                   # 核心：ReAct 循环编排
-    ├── ConversationHistory.java         # 管理对话消息列表
-    ├── ConsoleRenderer.java             # 终端彩色输出 Thought/Action/Observation
-    ├── ToolRegistry.java                # 工具注册、schema 生成、分发执行
-    ├── ToolDefinition.java              # Tool → OpenAI function schema 转换
-    ├── ToolResult.java                  # record：success + output
+    ├── config/
+    │   └── AgentConfig.java             # 加载 agent.properties 配置
+    ├── core/
+    │   ├── ReActLoop.java               # 核心：ReAct 循环编排
+    │   ├── ConversationHistory.java     # 管理对话消息列表
+    │   ├── SystemPrompt.java            # 系统提示词常量
+    │   ├── SystemPromptBuilder.java     # 按激活 skill 动态拼装 system prompt
+    │   └── StateReminder.java           # 动态状态注入（todo、已用迭代数）
+    ├── llm/
+    │   ├── LLMClient.java               # HttpClient 封装，调用 chat completions
+    │   └── LLMLogger.java               # 请求/响应日志记录
+    ├── memory/
+    │   ├── AgentsFileLoader.java         # 加载 .claude/agents 外部 skill 文件
+    │   └── ProjectContext.java           # 项目级上下文管理
+    ├── permission/
+    │   ├── PermissionPolicy.java         # 权限规则加载与匹配
+    │   ├── PermissionGate.java           # 工具调用前置权限检查
+    │   └── Decision.java                 # 权限决策枚举：ALLOW / ASK / DENY
+    ├── render/
+    │   └── ConsoleRenderer.java         # 终端彩色输出 Thought/Action/Observation
+    ├── skills/
+    │   ├── SkillDescriptor.java          # Skill 元数据描述
+    │   ├── SkillLoader.java              # 从文件系统加载 skill
+    │   ├── SkillRegistry.java            # skill 注册与查找
+    │   ├── SkillSessionState.java        # skill 会话状态管理
+    │   └── FrontmatterParser.java        # 解析 skill 文件的 frontmatter
+    ├── todo/
+    │   ├── TodoList.java                 # 任务列表管理
+    │   └── TodoItem.java                 # 单条任务项
     └── tools/
         ├── Tool.java                    # 工具接口
+        ├── ToolResult.java              # record：success + output
+        ├── ToolDefinition.java          # Tool → OpenAI function schema 转换
+        ├── ToolRegistry.java            # 工具注册、schema 生成、分发执行
         ├── ReadFileTool.java            # 读文件
         ├── WriteFileTool.java           # 写文件
+        ├── EditFileTool.java            # 精准编辑文件（old_string → new_string）
         ├── ListFilesTool.java           # 列目录
-        └── ExecuteCommandTool.java      # 执行 shell 命令
+        ├── ExecuteCommandTool.java      # 执行 shell 命令
+        ├── ActivateSkillTool.java       # 激活 / 注入 skill
+        └── TodoWriteTool.java           # 任务列表读写
 ```
 
 ## 技术选型
@@ -161,14 +188,17 @@ api.base-url=https://api.deepseek.com/v1
 api.model=deepseek-chat
 ```
 
-## 四个内置工具
+## 内置工具
 
 | 工具 | 参数 | 功能 |
 |------|------|------|
 | `read_file` | `path` | 读取文件内容，超过 10000 字符自动截断 |
 | `write_file` | `path`, `content` | 写入文件，自动创建父目录 |
-| `list_files` | `path`, `recursive`(可选) | 列出目录内容，目录标记 `[DIR]` 前缀 |
+| `edit_file` | `path`, `old_string`, `new_string`, `replace_all`(可选) | 精准替换文件中的文本片段 |
+| `list_files` | `path`, `recursive`(可选) | 列出目录内容，递归模式有深度上限和忽略规则 |
 | `execute_command` | `command` | 通过 `/bin/sh -c` 执行 shell 命令，30 秒超时 |
+| `activate_skill` | `skill_name` | 激活一个 skill，注入其系统提示词和专属工具 |
+| `todo_write` | `todos` | 读写任务列表，用于多步骤任务跟踪 |
 
 ## 核心流程详解
 
@@ -268,6 +298,11 @@ LLM 决定调用工具时，响应中会包含：
 | `ToolRegistry` | 注册工具、生成 `tools` JSON 数组、按名称分发执行 |
 | `ToolDefinition` | 将 `Tool` 接口转换为 OpenAI function schema 格式 |
 | `ToolResult` | record 类型，携带 `success` 标志和 `output` 文本 |
+| `PermissionGate` | 工具调用前置权限检查（deny → ask → allow） |
+| `PermissionPolicy` | 从 `permissions.json` 加载权限规则 |
+| `SkillRegistry` | skill 注册与查找，支持从 `.claude/agents/` 加载外部 skill |
+| `TodoList` | 多步骤任务跟踪，配合 `TodoWriteTool` 使用 |
+| `StateReminder` | 动态状态注入（todo 列表、已用迭代数），附加到 tool_result 末尾 |
 
 ## 如何扩展新工具
 
@@ -327,12 +362,14 @@ public class SearchFileTool implements Tool {
 2. 在 `ToolRegistry` 构造函数中注册：
 
 ```java
-public ToolRegistry() {
+public ToolRegistry(PermissionGate gate) {
     register(new ReadFileTool());
     register(new WriteFileTool());
+    register(new EditFileTool());
     register(new ListFilesTool());
     register(new ExecuteCommandTool());
-    register(new SearchFileTool());  // 添加这一行
+    register(new TodoWriteTool());
+    // register(new SearchFileTool());  // 添加自定义工具
 }
 ```
 
@@ -355,12 +392,13 @@ public ToolRegistry() {
 推荐按以下顺序阅读源码：
 
 1. **`Main.java`** — 了解整体组装方式，看各组件如何串联
-2. **`Tool.java` + `ReadFileTool.java`** — 理解工具接口和一个具体实现
-3. **`ToolDefinition.java` + `ToolRegistry.java`** — 理解工具如何转为 OpenAI function schema
-4. **`LLMClient.java`** — 理解如何构建和发送 API 请求
-5. **`ConversationHistory.java`** — 理解多轮对话的消息管理
-6. **`ReActLoop.java`** — 这是核心，理解 Thought → Action → Observation 循环
-7. **`ConsoleRenderer.java`** — 了解终端彩色输出的实现
+2. **`tools/Tool.java` + `tools/ReadFileTool.java`** — 理解工具接口和一个具体实现
+3. **`tools/ToolDefinition.java` + `tools/ToolRegistry.java`** — 理解工具如何转为 OpenAI function schema
+4. **`llm/LLMClient.java`** — 理解如何构建和发送 API 请求
+5. **`core/ConversationHistory.java`** — 理解多轮对话的消息管理
+6. **`core/ReActLoop.java`** — 这是核心，理解 Thought → Action → Observation 循环
+7. **`permission/PermissionPolicy.java` + `PermissionGate.java`** — 理解工具调用前的权限拦截
+8. **`render/ConsoleRenderer.java`** — 了解终端彩色输出的实现
 
 ## License
 

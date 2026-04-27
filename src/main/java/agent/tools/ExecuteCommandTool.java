@@ -50,31 +50,37 @@ public class ExecuteCommandTool implements Tool {
     public ToolResult execute(JsonObject args) {
         String command = args.get("command").getAsString();
         try {
-            // 使用 /bin/sh -c 执行命令，合并 stdout 和 stderr
             ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
             pb.redirectErrorStream(true);
             Process process = pb.start();
 
-            // 读取命令输出
-            String output;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                output = reader.lines().collect(Collectors.joining("\n"));
-            }
-
-            // 等待进程结束，超时则强制终止
+            // 先 waitFor 再读取：避免 reader.lines() 阻塞等 EOF 导致超时无法触发
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                return ToolResult.error("命令超时（" + TIMEOUT_SECONDS + " 秒）");
+                // 进程被强杀后 stream 才关闭，此时可以读已缓冲的输出
+                String partial = drainOutput(process);
+                return ToolResult.error("命令超时（" + TIMEOUT_SECONDS + " 秒）" +
+                        (partial.isEmpty() ? "" : "\n已有输出：\n" + partial));
             }
 
+            String output = drainOutput(process);
             int exitCode = process.exitValue();
             if (exitCode != 0) {
-                return ToolResult.success("退出码: " + exitCode + "\n" + output);
+                return ToolResult.error("退出码: " + exitCode + "\n" + output);
             }
             return ToolResult.success(output);
         } catch (Exception e) {
             return ToolResult.error("执行命令失败：" + e.getMessage());
+        }
+    }
+
+    private String drainOutput(Process process) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream()))) {
+            return reader.lines().collect(Collectors.joining("\n"));
+        } catch (Exception e) {
+            return "";
         }
     }
 }

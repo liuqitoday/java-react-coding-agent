@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -15,6 +16,11 @@ import java.util.stream.Stream;
  * 目录名前加 [DIR] 前缀以区分文件和目录。
  */
 public class ListFilesTool implements Tool {
+
+    private static final int MAX_DEPTH = 5;
+    private static final Set<String> IGNORED_DIRS = Set.of(
+            ".git", "node_modules", "target", "__pycache__", ".gradle", "build", ".idea"
+    );
 
     @Override
     public String name() {
@@ -65,8 +71,10 @@ public class ListFilesTool implements Tool {
                 return ToolResult.error("路径不是目录：" + dirPath);
             }
 
-            // recursive 为 true 时用 Files.walk 递归遍历，否则用 Files.list 只列一层
-            Stream<Path> stream = recursive ? Files.walk(path) : Files.list(path);
+            // recursive 为 true 时用 Files.walk 递归遍历（限制深度 + 过滤忽略目录），否则用 Files.list 只列一层
+            Stream<Path> stream = recursive
+                    ? Files.walk(path, MAX_DEPTH).filter(p -> shouldInclude(path, p))
+                    : Files.list(path);
             String result;
             try (stream) {
                 result = stream
@@ -86,5 +94,15 @@ public class ListFilesTool implements Tool {
         } catch (IOException e) {
             return ToolResult.error("列出文件失败：" + e.getMessage());
         }
+    }
+
+    private boolean shouldInclude(Path root, Path p) {
+        if (p.equals(root)) return true;
+        for (int i = root.getNameCount(); i < p.getNameCount(); i++) {
+            if (IGNORED_DIRS.contains(p.getName(i).toString())) {
+                return false;
+            }
+        }
+        return true;
     }
 }

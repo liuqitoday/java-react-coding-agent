@@ -133,6 +133,7 @@ public class ReActLoop {
 
             // 没有工具调用——这是最终回答
             if (content != null) {
+                history.addAssistantMessage(message);
                 renderer.renderFinalAnswer(content);
                 clearCompletedTodos();
             }
