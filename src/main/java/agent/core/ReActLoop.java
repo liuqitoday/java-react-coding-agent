@@ -32,25 +32,34 @@ import com.google.gson.JsonParser;
  */
 public class ReActLoop {
 
+    private static final int KEEP_LAST_TURNS = 3;
+
     private final LLMClient llmClient;
+    private final Compactor compactor;
     private final ToolRegistry toolRegistry;
     private final ConsoleRenderer renderer;
     private final int maxIterations;
     private final StateReminder stateReminder;
     private final PermissionGate gate;
     private final TodoList todoList;
+    private final boolean autoCompactEnabled;
+    private final int autoCompactThreshold;
 
-    public ReActLoop(LLMClient llmClient, ToolRegistry toolRegistry,
+    public ReActLoop(LLMClient llmClient, Compactor compactor, ToolRegistry toolRegistry,
                      ConsoleRenderer renderer, int maxIterations,
                      StateReminder stateReminder, PermissionGate gate,
-                     TodoList todoList) {
+                     TodoList todoList, boolean autoCompactEnabled,
+                     int autoCompactThreshold) {
         this.llmClient = llmClient;
+        this.compactor = compactor;
         this.toolRegistry = toolRegistry;
         this.renderer = renderer;
         this.maxIterations = maxIterations;
         this.stateReminder = stateReminder;
         this.gate = gate;
         this.todoList = todoList;
+        this.autoCompactEnabled = autoCompactEnabled;
+        this.autoCompactThreshold = autoCompactThreshold;
     }
 
     /**
@@ -63,13 +72,15 @@ public class ReActLoop {
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             renderer.renderSeparator();
 
+            String reminder = stateReminder.buildReminder();
+            compactHistoryIfNeeded(history, reminder);
+
             // 第一步：调用 LLM
             // 动态状态（TodoList 等）通过 ephemeral injection 临时注入到 messages 末尾，
             // 不写入持久历史——既避免污染历史消息，也不影响前缀缓存。
             JsonObject response;
             try {
-                response = llmClient.chatCompletion(
-                        history.toJsonArray(stateReminder.buildReminder()), tools);
+                response = llmClient.chatCompletion(history.toJsonArray(reminder), tools);
             } catch (Exception e) {
                 renderer.renderError("LLM 调用失败：" + e.getMessage());
                 return;
@@ -152,6 +163,33 @@ public class ReActLoop {
     private void clearCompletedTodos() {
         if (todoList.allCompleted()) {
             todoList.clear();
+        }
+    }
+
+    private void compactHistoryIfNeeded(ConversationHistory history, String reminder) {
+        if (!autoCompactEnabled) {
+            return;
+        }
+
+        int estimatedTokens = history.estimateTokens(reminder);
+        if (estimatedTokens <= autoCompactThreshold) {
+            return;
+        }
+
+        var turnsToCompact = history.getTurnsToCompact(KEEP_LAST_TURNS);
+        if (turnsToCompact.isEmpty()) {
+            return;
+        }
+
+        try {
+            String summary = compactor.compact(history.existingSummary(), turnsToCompact);
+            int compactedTurns = history.replaceOlderTurnsWithSummary(summary, KEEP_LAST_TURNS);
+            if (compactedTurns > 0) {
+                System.out.println("上下文过长（约 " + estimatedTokens + " tokens），已将较早的 "
+                        + compactedTurns + " 轮对话压缩为摘要。");
+            }
+        } catch (Exception e) {
+            System.out.println("上下文压缩失败，继续使用原始历史：" + e.getMessage());
         }
     }
 }

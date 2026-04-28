@@ -176,6 +176,10 @@ api.retry.max-attempts=3
 api.retry.initial-delay-ms=1000
 api.retry.max-delay-ms=8000
 
+# 长会话自动压缩配置
+context.auto-compact-enabled=true
+context.auto-compact-threshold=120000
+
 # ReAct 最大迭代次数（防止无限循环）
 agent.max-iterations=15
 

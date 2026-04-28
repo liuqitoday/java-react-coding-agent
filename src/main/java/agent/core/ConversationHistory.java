@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -16,6 +17,10 @@ import java.util.List;
  * 也只会在构建请求时以临时 developer message 追加到末尾，不写回持久历史。
  */
 public class ConversationHistory {
+
+    private static final String SUMMARY_MARKER = "[[COMPACTED_HISTORY]]";
+    private static final String SUMMARY_INSTRUCTION =
+            SUMMARY_MARKER + "\n以下是更早对话的摘要，请将其视为已知上下文。";
 
     /** 对话消息（不含 system message） */
     private final List<JsonObject> messages = new ArrayList<>();
@@ -91,5 +96,176 @@ public class ConversationHistory {
         }
 
         return array;
+    }
+
+    /**
+     * 粗略估算本轮请求 token 数。
+     *
+     * 这是学习项目里的近似值：按字符数估算，目标是发现"历史已经太长了"，
+     * 不追求与真实 tokenizer 完全一致。
+     */
+    public int estimateTokens(String ephemeralContext) {
+        int total = estimateTextTokens(systemPrompt) + 8;
+        for (JsonObject msg : messages) {
+            total += estimateMessageTokens(msg);
+        }
+        if (ephemeralContext != null && !ephemeralContext.isBlank()) {
+            total += estimateTextTokens(ephemeralContext) + 8;
+        }
+        return total;
+    }
+
+    /** 返回当前可被压缩的较早 turn；最近 keepLastTurns 个 turn 会被保留。 */
+    public List<List<JsonObject>> getTurnsToCompact(int keepLastTurns) {
+        List<List<JsonObject>> turns = splitIntoTurns(conversationMessages());
+        if (turns.size() <= keepLastTurns) {
+            return Collections.emptyList();
+        }
+
+        List<List<JsonObject>> result = new ArrayList<>();
+        for (int i = 0; i < turns.size() - keepLastTurns; i++) {
+            result.add(new ArrayList<>(turns.get(i)));
+        }
+        return result;
+    }
+
+    /** 返回当前已存在的滚动摘要；若还未压缩过则返回空字符串。 */
+    public String existingSummary() {
+        if (!hasSyntheticSummary()) {
+            return "";
+        }
+
+        JsonObject assistantSummary = messages.get(1);
+        if (!assistantSummary.has("content") || assistantSummary.get("content").isJsonNull()) {
+            return "";
+        }
+        return assistantSummary.get("content").getAsString();
+    }
+
+    /**
+     * 用新的摘要替换较早历史，只保留最近 keepLastTurns 个原始 turn。
+     *
+     * @return 被压缩掉的 turn 数量
+     */
+    public int replaceOlderTurnsWithSummary(String summary, int keepLastTurns) {
+        if (summary == null || summary.isBlank()) {
+            return 0;
+        }
+
+        List<JsonObject> conversationMessages = conversationMessages();
+        List<List<JsonObject>> turns = splitIntoTurns(conversationMessages);
+        if (turns.size() <= keepLastTurns) {
+            return 0;
+        }
+
+        int compactedTurnCount = turns.size() - keepLastTurns;
+        List<JsonObject> newMessages = new ArrayList<>();
+        newMessages.add(buildSummaryUserMessage());
+        newMessages.add(buildSummaryAssistantMessage(summary));
+
+        for (int i = compactedTurnCount; i < turns.size(); i++) {
+            for (JsonObject msg : turns.get(i)) {
+                newMessages.add(msg.deepCopy());
+            }
+        }
+
+        messages.clear();
+        messages.addAll(newMessages);
+        return compactedTurnCount;
+    }
+
+    private boolean hasSyntheticSummary() {
+        if (messages.size() < 2) {
+            return false;
+        }
+
+        JsonObject first = messages.get(0);
+        JsonObject second = messages.get(1);
+        if (!"user".equals(getRole(first)) || !"assistant".equals(getRole(second))) {
+            return false;
+        }
+        if (!first.has("content") || first.get("content").isJsonNull()) {
+            return false;
+        }
+        return first.get("content").getAsString().startsWith(SUMMARY_MARKER);
+    }
+
+    private List<JsonObject> conversationMessages() {
+        int start = hasSyntheticSummary() ? 2 : 0;
+        List<JsonObject> result = new ArrayList<>();
+        for (int i = start; i < messages.size(); i++) {
+            result.add(messages.get(i));
+        }
+        return result;
+    }
+
+    private List<List<JsonObject>> splitIntoTurns(List<JsonObject> sourceMessages) {
+        List<List<JsonObject>> turns = new ArrayList<>();
+        List<JsonObject> currentTurn = null;
+
+        for (JsonObject msg : sourceMessages) {
+            String role = getRole(msg);
+            if ("user".equals(role)) {
+                if (currentTurn != null && !currentTurn.isEmpty()) {
+                    turns.add(currentTurn);
+                }
+                currentTurn = new ArrayList<>();
+            }
+
+            if (currentTurn == null) {
+                return Collections.emptyList();
+            }
+            currentTurn.add(msg);
+        }
+
+        if (currentTurn != null && !currentTurn.isEmpty()) {
+            turns.add(currentTurn);
+        }
+        return turns;
+    }
+
+    private JsonObject buildSummaryUserMessage() {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("role", "user");
+        msg.addProperty("content", SUMMARY_INSTRUCTION);
+        return msg;
+    }
+
+    private JsonObject buildSummaryAssistantMessage(String summary) {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("role", "assistant");
+        msg.addProperty("content", summary);
+        return msg;
+    }
+
+    private String getRole(JsonObject msg) {
+        if (!msg.has("role") || msg.get("role").isJsonNull()) {
+            return "";
+        }
+        return msg.get("role").getAsString();
+    }
+
+    private int estimateMessageTokens(JsonObject msg) {
+        return estimateTextTokens(msg.toString()) + 8;
+    }
+
+    private int estimateTextTokens(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+
+        int asciiChars = 0;
+        int nonAsciiChars = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) <= 127) {
+                asciiChars++;
+            } else {
+                nonAsciiChars++;
+            }
+        }
+
+        int asciiTokens = (asciiChars + 3) / 4;
+        int nonAsciiTokens = (nonAsciiChars + 1) / 2;
+        return Math.max(1, asciiTokens + nonAsciiTokens);
     }
 }

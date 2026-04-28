@@ -16,6 +16,8 @@ import java.util.Properties;
  * - api.retry.max-attempts      LLM API 最大尝试次数（包含首次请求）
  * - api.retry.initial-delay-ms  首次重试前等待时间（毫秒）
  * - api.retry.max-delay-ms      指数退避的最大等待时间（毫秒）
+ * - context.auto-compact-enabled   是否启用长会话自动压缩
+ * - context.auto-compact-threshold 触发自动压缩的粗略 token 阈值
  * - agent.max-iterations  ReAct 最大迭代次数，防止无限循环
  *
  * 注意：system prompt 是产品逻辑，不属于用户配置，定义在 {@link SystemPrompt} 中。
@@ -67,8 +69,34 @@ public class AgentConfig {
         return longProperty("api.retry.max-delay-ms", 8000L, 0L);
     }
 
+    public boolean contextAutoCompactEnabled() {
+        return booleanProperty("context.auto-compact-enabled", true);
+    }
+
+    public int contextAutoCompactThreshold() {
+        return intProperty("context.auto-compact-threshold", 120000, 1);
+    }
+
     public int maxIterations() {
         return Integer.parseInt(props.getProperty("agent.max-iterations", "15"));
+    }
+
+    private boolean booleanProperty(String key, boolean defaultValue) {
+        String value = props.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+
+        String normalized = value.trim().toLowerCase();
+        if ("true".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized)) {
+            return false;
+        }
+
+        System.err.println("警告：配置项 " + key + " 不是合法布尔值，使用默认值 " + defaultValue);
+        return defaultValue;
     }
 
     private int intProperty(String key, int defaultValue, int minValue) {

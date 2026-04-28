@@ -2,6 +2,7 @@ package agent;
 
 import agent.config.AgentConfig;
 import agent.core.ConversationHistory;
+import agent.core.Compactor;
 import agent.core.ReActLoop;
 import agent.core.StateReminder;
 import agent.core.SystemPrompt;
@@ -52,6 +53,7 @@ public class Main {
         // 初始化核心组件
         LLMLogger logger = new LLMLogger();
         LLMClient llmClient = new LLMClient(config, logger);
+        Compactor compactor = new Compactor(llmClient);
         ToolRegistry toolRegistry = new ToolRegistry();
         ConsoleRenderer renderer = new ConsoleRenderer();
 
@@ -101,8 +103,10 @@ public class Main {
         // 创建对话历史和 ReAct 循环
         ConversationHistory history = new ConversationHistory(promptBuilder.build());
         ReActLoop reactLoop = new ReActLoop(
-                llmClient, toolRegistry, renderer, config.maxIterations(),
-                stateReminder, permissionGate, todoList);
+                llmClient, compactor, toolRegistry, renderer, config.maxIterations(),
+                stateReminder, permissionGate, todoList,
+                config.contextAutoCompactEnabled(),
+                config.contextAutoCompactThreshold());
 
         System.out.println("模型: " + config.model());
         System.out.println("日志: " + logger.getLogFile());
