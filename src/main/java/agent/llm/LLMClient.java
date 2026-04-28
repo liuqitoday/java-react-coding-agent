@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -26,12 +27,18 @@ public class LLMClient {
     private final String baseUrl;
     private final String model;
     private final LLMLogger logger;
+    private final int maxRetryAttempts;
+    private final long initialRetryDelayMs;
+    private final long maxRetryDelayMs;
 
     public LLMClient(AgentConfig config, LLMLogger logger) {
         this.apiKey = config.apiKey();
         this.baseUrl = config.baseUrl();
         this.model = config.model();
         this.logger = logger;
+        this.maxRetryAttempts = config.apiRetryMaxAttempts();
+        this.initialRetryDelayMs = config.apiRetryInitialDelayMs();
+        this.maxRetryDelayMs = Math.max(initialRetryDelayMs, config.apiRetryMaxDelayMs());
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -68,22 +75,80 @@ public class LLMClient {
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
-        // 发送请求
-        HttpResponse<String> response;
-        try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        } catch (Exception e) {
-            logger.logError(e.getClass().getSimpleName() + ": " + e.getMessage());
-            throw e;
-        }
-
-        // 记录响应日志（收到后）
-        logger.logResponse(response.statusCode(), response.body());
-
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("API 请求失败 (HTTP " + response.statusCode() + "): " + response.body());
-        }
+        HttpResponse<String> response = sendWithRetry(request);
 
         return JsonParser.parseString(response.body()).getAsJsonObject();
+    }
+
+    private HttpResponse<String> sendWithRetry(HttpRequest request) throws Exception {
+        long delayMs = initialRetryDelayMs;
+
+        for (int attempt = 1; attempt <= maxRetryAttempts; attempt++) {
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                logger.logResponse(response.statusCode(), response.body(), attempt, maxRetryAttempts);
+
+                if (response.statusCode() == 200) {
+                    return response;
+                }
+
+                String errorMessage = buildHttpErrorMessage(response);
+                logger.logError("第 " + attempt + "/" + maxRetryAttempts + " 次尝试返回 HTTP "
+                        + response.statusCode());
+
+                if (!shouldRetryStatus(response.statusCode()) || attempt == maxRetryAttempts) {
+                    throw new RuntimeException(errorMessage);
+                }
+
+                logger.logRetry(attempt + 1, maxRetryAttempts, delayMs,
+                        "收到可重试状态码 HTTP " + response.statusCode());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.logError("请求在第 " + attempt + "/" + maxRetryAttempts + " 次尝试时被中断: "
+                        + e.getMessage());
+                throw e;
+            } catch (IOException e) {
+                logger.logError("第 " + attempt + "/" + maxRetryAttempts + " 次尝试异常: "
+                        + e.getClass().getSimpleName() + ": " + e.getMessage());
+
+                if (attempt == maxRetryAttempts) {
+                    throw e;
+                }
+
+                logger.logRetry(attempt + 1, maxRetryAttempts, delayMs,
+                        e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+
+            sleepBeforeRetry(delayMs);
+            delayMs = nextDelay(delayMs);
+        }
+
+        throw new IllegalStateException("LLM 请求重试逻辑异常退出");
+    }
+
+    private boolean shouldRetryStatus(int statusCode) {
+        return statusCode == 408 || statusCode == 429 || statusCode >= 500;
+    }
+
+    private String buildHttpErrorMessage(HttpResponse<String> response) {
+        return "API 请求失败 (HTTP " + response.statusCode() + "): " + response.body();
+    }
+
+    private void sleepBeforeRetry(long delayMs) throws InterruptedException {
+        if (delayMs <= 0) {
+            return;
+        }
+        Thread.sleep(delayMs);
+    }
+
+    private long nextDelay(long currentDelayMs) {
+        if (currentDelayMs <= 0) {
+            return 0;
+        }
+        long doubledDelay = currentDelayMs * 2;
+        if (doubledDelay < 0) {
+            return maxRetryDelayMs;
+        }
+        return Math.min(doubledDelay, maxRetryDelayMs);
     }
 }

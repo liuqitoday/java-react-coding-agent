@@ -171,6 +171,11 @@ api.base-url=https://api.openai.com/v1
 # 使用的模型名称
 api.model=gpt-4o
 
+# LLM API 重试配置（max-attempts 包含首次请求）
+api.retry.max-attempts=3
+api.retry.initial-delay-ms=1000
+api.retry.max-delay-ms=8000
+
 # ReAct 最大迭代次数（防止无限循环）
 agent.max-iterations=15
 

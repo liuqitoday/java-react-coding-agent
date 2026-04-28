@@ -59,11 +59,12 @@ public class LLMLogger {
     }
 
     /** 记录响应体（收到 API 响应之后调用）。 */
-    public void logResponse(int httpStatus, String responseBody) {
+    public void logResponse(int httpStatus, String responseBody, int attempt, int maxAttempts) {
         String timestamp = LocalDateTime.now().format(TIMESTAMP_FMT);
 
         write("");
-        write("┌─ 响应 #" + requestCount + "  [" + timestamp + "]  HTTP " + httpStatus + " ────────");
+        write("┌─ 响应 #" + requestCount + "  [" + timestamp + "]  第 " + attempt + "/" + maxAttempts
+                + " 次尝试  HTTP " + httpStatus + " ────────");
         // 尝试 pretty-print，如果不是合法 JSON 则原样输出
         try {
             var parsed = prettyGson.fromJson(responseBody, Object.class);
@@ -79,6 +80,14 @@ public class LLMLogger {
         String timestamp = LocalDateTime.now().format(TIMESTAMP_FMT);
         write("");
         write("╳─ 错误 #" + requestCount + "  [" + timestamp + "]: " + error);
+    }
+
+    /** 记录即将发起的重试。 */
+    public void logRetry(int nextAttempt, int maxAttempts, long delayMs, String reason) {
+        String timestamp = LocalDateTime.now().format(TIMESTAMP_FMT);
+        write("");
+        write("↻─ 重试 #" + requestCount + "  [" + timestamp + "]: 将在 " + delayMs + "ms 后进行第 "
+                + nextAttempt + "/" + maxAttempts + " 次尝试，原因：" + reason);
     }
 
     public Path getLogFile() {

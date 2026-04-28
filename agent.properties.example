@@ -1,4 +1,7 @@
 api.key=
 api.base-url=
 api.model=claude-haiku-4-5
+api.retry.max-attempts=3
+api.retry.initial-delay-ms=1000
+api.retry.max-delay-ms=8000
 agent.max-iterations=15
