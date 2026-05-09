@@ -96,8 +96,12 @@ public class ReActLoop {
                 content = message.get("content").getAsString();
             }
 
-            // 第三步：判断是否有工具调用
-            if (message.has("tool_calls") && !message.getAsJsonArray("tool_calls").isEmpty()) {
+            // 第三步：判断是否有工具调用。部分 OpenAI 兼容 API 会返回 tool_calls: null。
+            JsonArray toolCalls = null;
+            if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
+                toolCalls = message.getAsJsonArray("tool_calls");
+            }
+            if (toolCalls != null && !toolCalls.isEmpty()) {
                 renderer.renderThought(content);
 
                 // 将包含 tool_calls 的完整 assistant 消息加入历史
@@ -105,7 +109,6 @@ public class ReActLoop {
                 history.addAssistantMessage(message);
 
                 // 逐个处理工具调用
-                JsonArray toolCalls = message.getAsJsonArray("tool_calls");
                 int total = toolCalls.size();
                 for (int i = 0; i < total; i++) {
                     JsonObject toolCall = toolCalls.get(i).getAsJsonObject();
